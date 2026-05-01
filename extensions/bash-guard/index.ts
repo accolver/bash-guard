@@ -2,7 +2,7 @@
  * Bash Guard — Adversarial Security Review Extension
  *
  * Intercepts bash tool calls and runs 5 parallel security reviews using
- * Claude Haiku 4.5 (via the user's configured model registry). Based on vote consensus:
+ * gpt-5.4-mini by default (via the user's configured model registry). Based on vote consensus:
  *
  *   Unanimous YES  → auto-allow (notification, or debug dialog)
  *   Unanimous NO   → markdown dialog with explanation + override
@@ -33,6 +33,7 @@ import {
 	type ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
 import { Container, Markdown, matchesKey, Key, Spacer, Text } from "@mariozechner/pi-tui";
+import { evaluateCommandPolicy, normalizeCommand } from "./policy";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -40,8 +41,12 @@ import { Container, Markdown, matchesKey, Key, Spacer, Text } from "@mariozechne
 const VOTES_PER_MODEL = 5;
 const VOTE_TIMEOUT_MS = 5000;
 
-const EXPLAINER_PROVIDER = "anthropic";
-const EXPLAINER_MODEL_ID = "claude-haiku-4-5";
+const VOTER_PROVIDER = process.env.PI_BASH_GUARD_VOTER_PROVIDER ?? "openai-codex";
+const VOTER_MODEL_ID = process.env.PI_BASH_GUARD_VOTER_MODEL ?? "gpt-5.4-mini";
+const VOTER_MODEL_LABEL = process.env.PI_BASH_GUARD_VOTER_LABEL ?? VOTER_MODEL_ID;
+
+const EXPLAINER_PROVIDER = process.env.PI_BASH_GUARD_EXPLAINER_PROVIDER ?? "anthropic";
+const EXPLAINER_MODEL_ID = process.env.PI_BASH_GUARD_EXPLAINER_MODEL ?? "claude-haiku-4-5";
 const EXPLAINER_CONTEXT_MESSAGES = 20;
 
 const VOTER_SYSTEM_PROMPT = `You are a security reviewer. Your only job is to review a single bash command and decide if it is safe.
@@ -54,14 +59,16 @@ YES means: the command is safe to run on a developer's machine.
 NO means: the command is unsafe or risky.
 
 Guidelines for your review:
-- Deleting or overwriting files or directories → NO
-- Accessing or exposing credentials, keys, tokens → NO
+- Deleting or overwriting tracked files or directories → NO
+- Deleting or overwriting files in /tmp or files not yet tracked by git → YES
+- Accessing or exposing credential material, .env files, SSH/GCP/Kubernetes/AWS credential locations, or terraform.tfvars → NO
 - Network requests to untrusted or unexpected endpoints → NO
 - Installing software from untrusted sources → NO
 - Irreversible or destructive operations → NO
 - Privilege escalation (sudo, chmod 777) → NO
 - Modifying system configuration or services → NO
 - Modifying global or user-wide config (--global flags, writing to $HOME dotfiles, global installs) → NO
+- Mutating cloud resources with aws, gcloud, gsutil, bq, kubectl, terraform, or terragrunt → NO unless the user explicitly asked for that exact mutation
 - Reading files, listing directories, running tests, building projects, installing declared project dependencies, git read operations, text processing → YES`;
 
 const EXPLAINER_SYSTEM_PROMPT = `You are reviewing a bash command that an AI coding assistant is attempting to execute. A panel of security reviewers flagged this command.
@@ -79,20 +86,22 @@ Be factual and concise. Do not add any other text outside this format.`;
 // ── Safe-command whitelist ────────────────────────────────────────────────────
 
 const SAFE_COMMAND_PATTERNS: RegExp[] = [
-	/^\s*ls\b/, /^\s*cat\b/, /^\s*echo\b/, /^\s*printf\b/,
+	/^\s*ls\b/, /^\s*echo\b/, /^\s*printf\b/,
 	/^\s*pwd\s*$/, /^\s*whoami\s*$/, /^\s*date\b/,
 	/^\s*head\b/, /^\s*tail\b/, /^\s*wc\b/,
 	/^\s*grep\b/, /^\s*rg\b/,
+	// cat/env/printenv omitted: too easy to expose secrets from .env, SSH keys, cloud creds.
 	// find/fd omitted: -exec, -delete can run/delete anything
 	// awk omitted: system() builtin, internal file I/O
 	// sort omitted: -o flag writes to files
+	// git diff/show omitted: can expose committed secrets or sensitive local changes.
 	/^\s*which\b/, /^\s*type\b/, /^\s*file\b/, /^\s*stat\b/,
 	/^\s*du\b/, /^\s*df\b/, /^\s*tree\b/, /^\s*man\b/, /^\s*diff\b/,
 	/^\s*md5(sum)?\b/, /^\s*sha\d+sum\b/,
 	/^\s*uniq\b/, /^\s*cut\b/, /^\s*tr\b/, /^\s*jq\b/,
-	/^\s*git\s+(status|log|diff|show|branch|tag|remote|stash\s+list|config\s+--get)\b/,
+	/^\s*git\s+(status|log|branch|tag|remote|stash\s+list|config\s+--get)\b/,
 	/^\s*cd\b/, /^\s*basename\b/, /^\s*dirname\b/, /^\s*realpath\b/, /^\s*readlink\b/,
-	/^\s*env\s*$/, /^\s*printenv\b/, /^\s*uname\b/, /^\s*id\s*$/,
+	/^\s*uname\b/, /^\s*id\s*$/,
 	/^\s*hostname\b/, /^\s*nproc\s*$/, /^\s*free\b/, /^\s*uptime\s*$/,
 	/^\s*test\b/, /^\s*\[\s/,
 ];
@@ -101,16 +110,6 @@ const SAFE_COMMAND_PATTERNS: RegExp[] = [
 const UNSAFE_SHELL_CHARS = /[|;&`\n]/;
 const SUBSHELL_PATTERN = /\$\(/;
 const REDIRECT_PATTERN = />{1,2}/;
-
-function isWhitelisted(command: string): boolean {
-	// Collapse line-continuations and stray newlines into spaces so that
-	// long paths wrapped by the LLM don't trigger the \n guard.
-	const trimmed = command.trim().replace(/\\\n\s*/g, "").replace(/\n\s*/g, " ");
-	if (UNSAFE_SHELL_CHARS.test(trimmed)) return false;
-	if (SUBSHELL_PATTERN.test(trimmed)) return false;
-	if (REDIRECT_PATTERN.test(trimmed)) return false;
-	return SAFE_COMMAND_PATTERNS.some((p) => p.test(trimmed));
-}
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -204,7 +203,7 @@ async function resolveVoterModels(ctx: ExtensionContext): Promise<VoterModel[]> 
 	if (cachedVoterModels) return cachedVoterModels;
 
 	const candidates: Array<{ provider: string; id: string; label: string }> = [
-		{ provider: "anthropic", id: "claude-haiku-4-5", label: "haiku-4.5" },
+		{ provider: VOTER_PROVIDER, id: VOTER_MODEL_ID, label: VOTER_MODEL_LABEL },
 	];
 
 	const available: VoterModel[] = [];
@@ -763,6 +762,20 @@ export default function (pi: ExtensionAPI) {
 		if (!guardEnabled) return;
 
 		const command = event.input.command;
+		const policy = evaluateCommandPolicy(command, ctx.cwd);
+		if (policy.action === "allow") {
+			if (ctx.hasUI && debugEnabled) ctx.ui.notify(`✅ Policy allow — ${policy.reason}`, "info");
+			return;
+		}
+		if (policy.action === "review") {
+			const ok = await requestPolicyApproval(ctx, command, policy.reason);
+			if (!ok) {
+				return { block: true, reason: `Bash guard policy blocked command: ${policy.reason}.` };
+			}
+			if (ctx.hasUI) ctx.ui.notify(`⚠️ User approved policy trigger — ${policy.reason}`, "warning");
+			return;
+		}
+
 		if (isWhitelisted(command)) return;
 
 		const previousOverride = overrideHistory.find((o) => o.command === command);

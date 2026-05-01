@@ -1,11 +1,17 @@
 # Bash Guard
 
-Adversarial security review extension for [pi](https://github.com/badlogic/pi-mono). Intercepts bash tool calls and runs parallel security reviews using fast LLM voters before allowing execution.
+Adversarial security review extension for [pi](https://github.com/badlogic/pi-mono). Intercepts bash tool calls, applies deterministic sensitive-command policy checks, and runs parallel security reviews using fast LLM voters before allowing execution.
 
 ## How it works
 
 ```
 LLM calls bash tool
+       │
+       ▼
+  Deterministic policy check
+       │
+       ├─ free mutation in /tmp or untracked git files ─▶ Allow instantly
+       ├─ sensitive/cloud/out-of-CWD trigger ───────────▶ Ask user
        │
        ▼
   Whitelisted? ──yes──▶ Allow instantly
@@ -14,7 +20,7 @@ LLM calls bash tool
   Previously overridden? ──yes──▶ Allow + notify
        │ no
        ▼
-  Fire 5 parallel Haiku 4.5 voters
+  Fire 5 parallel gpt-5.4-mini voters
   "Is this command safe? YES or NO"
   (with <previous_decisions> context)
        │
@@ -32,7 +38,7 @@ LLM calls bash tool
 ## Features
 
 ### Voting
-- **5 parallel voters** using Claude Haiku 4.5 (configurable)
+- **5 parallel voters** using `gpt-5.4-mini` by default (configurable)
 - **5-second timeout** per voter — timeouts count as abstentions
 - **Live vote tracker** UI with real-time dot updates
 - **Multi-model support** — round-robin across available models
@@ -59,16 +65,29 @@ LLM calls bash tool
   - **Why it's being run**
   - **Risk**
 
+### Deterministic policy guardrails
+Before the LLM voters run, Bash Guard applies local deterministic checks:
+
+- **Free manipulation** — mutating commands like `rm`, `mv`, `cp`, `mkdir`, `touch`, `truncate`, `ln`, `chmod`, `chown`, and `install` are allowed without review when every target path is either:
+  - under `/tmp` or `/private/tmp`, or
+  - inside the current working directory and not tracked by git.
+- **Ask for assistance** — commands touching files outside the current working directory require user approval, except `/tmp` paths.
+- **Sensitive bash protection** — commands that read or expose environment variables, escalate privileges, run remote shell scripts, use `chmod 777`, or force-delete broad paths require user approval.
+- **Sensitive path protection** — paths like `.env`, `.ssh`, `.aws`, `.config/gcloud`, `.kube`, `.gnupg`, `.npmrc`, `.netrc`, `terraform.tfvars`, credential/token/secret paths, and key/cert files require user approval.
+- **Cloud mutation protection** — mutating `aws`, `gcloud`, `gsutil`, `bq`, `kubectl`, `terraform`, and `terragrunt` commands require user approval.
+
+In non-interactive mode, policy approval prompts become hard blocks.
+
 ### Whitelist
-Read-only commands bypass the review entirely for zero overhead:
-- File inspection: `ls`, `cat`, `head`, `tail`, `wc`, `file`, `stat`, `diff`
+Read-only commands bypass the LLM review entirely for zero overhead, unless the deterministic policy catches a sensitive path, cloud mutation, or out-of-CWD path first:
+- File inspection: `ls`, `head`, `tail`, `wc`, `file`, `stat`, `diff`
 - Search: `grep`, `rg`
 - Text processing: `cut`, `tr`, `uniq`, `jq`
 - Path utilities: `basename`, `dirname`, `realpath`, `readlink`, `cd`
-- System info: `pwd`, `whoami`, `date`, `uname`, `id`, `hostname`, `nproc`, `free`, `uptime`, `env`, `printenv`
+- System info: `pwd`, `whoami`, `date`, `uname`, `id`, `hostname`, `nproc`, `free`, `uptime`
 - Checksums: `md5`/`md5sum`, `sha*sum`
 - Other: `echo`, `printf`, `which`, `type`, `du`, `df`, `tree`, `man`, `test`, `[`
-- Git (read-only): `status`, `log`, `diff`, `show`, `branch`, `tag`, `remote`, `stash list`, `config --get`
+- Git (read-only): `status`, `log`, `branch`, `tag`, `remote`, `stash list`, `config --get`
 
 **Disqualifiers** — any of these send the command to voters regardless:
 - Pipes (`|`), semicolons (`;`), ampersands (`&`), backticks (`` ` ``), newlines
@@ -76,6 +95,8 @@ Read-only commands bypass the review entirely for zero overhead:
 - Redirects (`>`, `>>`)
 
 **Intentionally omitted** from whitelist:
+- `cat`/`env`/`printenv` — can expose secrets too easily
+- `git diff`/`git show` — can expose committed secrets or sensitive local changes
 - `find`/`fd` — `-exec`, `-delete` flags
 - `awk` — `system()` builtin, internal file I/O
 - `sort` — `-o` flag writes to files
@@ -118,6 +139,8 @@ Debug state persists across `/reload`.
 ## Non-interactive Mode
 
 In print mode (`-p`) or JSON mode, the guard:
+- Auto-allows deterministic free mutations in `/tmp` or untracked files
+- Blocks deterministic policy triggers that need user approval
 - Auto-allows previously overridden commands (from earlier interactive sessions)
 - Blocks anything else that isn't unanimous YES
 - Returns a descriptive denial reason to the LLM
@@ -125,17 +148,20 @@ In print mode (`-p`) or JSON mode, the guard:
 
 ## Configuration
 
-Edit `index.ts` constants at the top of the file:
+Edit `index.ts` constants at the top of the file, or set environment variables for model selection:
 
-| Constant | Default | Description |
+| Constant / Env var | Default | Description |
 |---|---|---|
 | `VOTES_PER_MODEL` | `5` | Number of votes per available model |
 | `VOTE_TIMEOUT_MS` | `5000` | Timeout per voter in milliseconds |
-| `EXPLAINER_PROVIDER` | `"anthropic"` | Provider for the explainer model |
-| `EXPLAINER_MODEL_ID` | `"claude-haiku-4-5"` | Model ID for the explainer |
+| `PI_BASH_GUARD_VOTER_PROVIDER` | `"openai-codex"` | Provider for voter models |
+| `PI_BASH_GUARD_VOTER_MODEL` | `"gpt-5.4-mini"` | Model ID for voters |
+| `PI_BASH_GUARD_VOTER_LABEL` | same as voter model | Label shown in debug UI |
+| `PI_BASH_GUARD_EXPLAINER_PROVIDER` | `"anthropic"` | Provider for the explainer model |
+| `PI_BASH_GUARD_EXPLAINER_MODEL` | `"claude-haiku-4-5"` | Model ID for the explainer |
 | `EXPLAINER_CONTEXT_MESSAGES` | `20` | Number of recent messages sent to explainer |
 
-Voter model candidates are defined in `resolveVoterModels()`. Models are resolved through the user's model registry, so proxy configurations and custom API keys are respected automatically.
+Models are resolved through the user's model registry, so proxy configurations and custom API keys are respected automatically.
 
 ## Security
 

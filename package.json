@@ -1,43 +1,35 @@
 {
-  "name": "@pascal-de-ladurantaye/pi-agent",
+  "name": "@accolver/bash-guard",
   "version": "0.1.0",
-  "description": "Custom Pi extensions, skills, prompt templates, and themes",
+  "description": "Bash Guard pi extension with deterministic sensitive-command protection and LLM voting",
   "license": "MIT",
   "packageManager": "pnpm@10.28.0",
   "type": "module",
   "keywords": [
     "pi-package",
     "pi",
-    "coding-agent"
+    "coding-agent",
+    "bash-guard",
+    "security"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/pascal-de-ladurantaye/pi-agent.git"
+    "url": "https://github.com/accolver/bash-guard.git"
   },
-  "homepage": "https://github.com/pascal-de-ladurantaye/pi-agent",
+  "homepage": "https://github.com/accolver/bash-guard",
+  "scripts": {
+    "check": "bun --check extensions/bash-guard/index.ts extensions/bash-guard/policy.ts",
+    "test": "bun test extensions/bash-guard/*.test.ts"
+  },
   "pi": {
     "extensions": [
-      "./extensions"
-    ],
-    "skills": [
-      "./skills"
-    ],
-    "prompts": [
-      "./prompts"
-    ],
-    "themes": [
-      "./themes"
+      "./extensions/bash-guard"
     ]
-  },
-  "dependencies": {
-    "diff": "^8.0.0",
-    "ws": "^8.18.1"
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*",
-    "@sinclair/typebox": "*"
+    "@mariozechner/pi-tui": "*"
   },
   "peerDependenciesMeta": {
     "@mariozechner/pi-ai": {
@@ -47,9 +39,6 @@
       "optional": true
     },
     "@mariozechner/pi-tui": {
-      "optional": true
-    },
-    "@sinclair/typebox": {
       "optional": true
     }
   }
