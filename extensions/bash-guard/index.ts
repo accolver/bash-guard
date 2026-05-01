@@ -111,6 +111,21 @@ const UNSAFE_SHELL_CHARS = /[|;&`\n]/;
 const SUBSHELL_PATTERN = /\$\(/;
 const REDIRECT_PATTERN = />{1,2}/;
 
+async function requestPolicyApproval(ctx: ExtensionContext, command: string, reason: string): Promise<boolean> {
+	if (!ctx.hasUI) return false;
+	const ok = await ctx.ui.confirm(
+		"🔒 Bash Guard assistance required",
+		[
+			`Policy trigger: ${reason}`,
+			"",
+			`$ ${truncateCmd(command, 200)}`,
+			"",
+			"Allow this command?",
+		].join("\n"),
+	);
+	return ok ?? false;
+}
+
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
 /** Minimal theme interface for type safety instead of `any`. */
