@@ -33,6 +33,7 @@ import {
 	type ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
 import { Container, Markdown, matchesKey, Key, Spacer, Text } from "@mariozechner/pi-tui";
+import { DEFAULT_GUARD_ENABLED } from "./config";
 import { evaluateCommandPolicy, normalizeCommand } from "./policy";
 
 // ── Configuration ────────────────────────────────────────────────────────────
@@ -110,6 +111,14 @@ const SAFE_COMMAND_PATTERNS: RegExp[] = [
 const UNSAFE_SHELL_CHARS = /[|;&`\n]/;
 const SUBSHELL_PATTERN = /\$\(/;
 const REDIRECT_PATTERN = />{1,2}/;
+
+function isWhitelisted(command: string): boolean {
+	const normalized = normalizeCommand(command);
+	if (UNSAFE_SHELL_CHARS.test(normalized)) return false;
+	if (SUBSHELL_PATTERN.test(normalized)) return false;
+	if (REDIRECT_PATTERN.test(normalized)) return false;
+	return SAFE_COMMAND_PATTERNS.some((pattern) => pattern.test(normalized));
+}
 
 async function requestPolicyApproval(ctx: ExtensionContext, command: string, reason: string): Promise<boolean> {
 	if (!ctx.hasUI) return false;
@@ -704,7 +713,7 @@ async function showReviewDialog(
 // ── Extension entry point ────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
-	let guardEnabled = true;
+	let guardEnabled = DEFAULT_GUARD_ENABLED;
 	let debugEnabled = false;
 
 	function updateStatus(ctx: ExtensionContext) {
