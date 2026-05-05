@@ -8,4 +8,4 @@ export function parseBooleanEnv(value: string | undefined, defaultValue: boolean
 	return defaultValue;
 }
 
-export const DEFAULT_GUARD_ENABLED = parseBooleanEnv(process.env.PI_BASH_GUARD_ENABLED, true);
+export const DEFAULT_GUARD_ENABLED = parseBooleanEnv(process.env.PI_BASH_GUARD_ENABLED, false);

@@ -154,7 +154,7 @@ Edit `index.ts` constants at the top of the file, or set environment variables f
 |---|---|---|
 | `VOTES_PER_MODEL` | `5` | Number of votes per available model |
 | `VOTE_TIMEOUT_MS` | `5000` | Timeout per voter in milliseconds |
-| `PI_BASH_GUARD_ENABLED` | `"true"` | Initial guard state for new sessions (`0`, `false`, `no`, `off`, or `disabled` starts disabled) |
+| `PI_BASH_GUARD_ENABLED` | `"false"` | Initial guard state for new sessions (`1`, `true`, `yes`, `on`, or `enabled` starts enabled) |
 | `PI_BASH_GUARD_VOTER_PROVIDER` | `"openai-codex"` | Provider for voter models |
 | `PI_BASH_GUARD_VOTER_MODEL` | `"gpt-5.4-mini"` | Model ID for voters |
 | `PI_BASH_GUARD_VOTER_LABEL` | same as voter model | Label shown in debug UI |

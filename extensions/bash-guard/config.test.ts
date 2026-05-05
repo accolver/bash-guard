@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseBooleanEnv } from "./config";
+import { DEFAULT_GUARD_ENABLED, parseBooleanEnv } from "./config";
+
+describe("DEFAULT_GUARD_ENABLED", () => {
+	test("starts disabled unless PI_BASH_GUARD_ENABLED opts in", () => {
+		expect(DEFAULT_GUARD_ENABLED).toBe(false);
+	});
+});
 
 describe("parseBooleanEnv", () => {
 	test("uses the default when unset or unrecognized", () => {
