@@ -17,22 +17,22 @@
  */
 
 import {
-	complete,
 	type Model,
 	type TextContent,
 	type ThinkingContent,
 	type ToolCall,
 	type ToolResultMessage,
 	type UserMessage,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
+import { complete } from "@earendil-works/pi-ai/compat";
 import {
 	isToolCallEventType,
 	DynamicBorder,
 	getMarkdownTheme,
 	type ExtensionAPI,
 	type ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
-import { Container, Markdown, matchesKey, Key, Spacer, Text } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-coding-agent";
+import { Container, Markdown, matchesKey, Key, Spacer, Text } from "@earendil-works/pi-tui";
 import { DEFAULT_GUARD_ENABLED } from "./config";
 import { evaluateCommandPolicy, normalizeCommand } from "./policy";
 
