@@ -1,6 +1,6 @@
 {
   "name": "@accolver/bash-guard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Bash Guard pi extension with deterministic sensitive-command protection and LLM voting",
   "license": "MIT",
   "packageManager": "pnpm@11.17.0",
